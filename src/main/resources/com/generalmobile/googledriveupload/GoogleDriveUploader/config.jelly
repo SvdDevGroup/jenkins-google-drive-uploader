@@ -1,5 +1,9 @@
+<?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:auth="/lib/auth" xmlns:form="/lib/form">
     <auth:credentials title="${%Google Credentials}" field="credentialsId"/>
+    <form:entry title="${%Shared Drive name}" field="sharedDriveName">
+        <form:textbox />
+    </form:entry>    
     <form:entry title="${%Drive Folder Name}" field="driveFolderName">
         <form:textbox />
     </form:entry>

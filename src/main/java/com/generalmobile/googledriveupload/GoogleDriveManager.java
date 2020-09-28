@@ -1,179 +1,215 @@
 package com.generalmobile.googledriveupload;
 
-import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.googleapis.batch.BatchRequest;
 import com.google.api.client.googleapis.batch.json.JsonBatchCallback;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.googleapis.json.GoogleJsonError;
-import com.google.api.client.googleapis.media.MediaHttpUploader;
-import com.google.api.client.googleapis.media.MediaHttpUploaderProgressListener;
 import com.google.api.client.http.FileContent;
 import com.google.api.client.http.HttpHeaders;
-import com.google.api.client.http.HttpTransport;
-import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
+import com.google.api.services.drive.DriveRequest;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
 import com.google.api.services.drive.model.Permission;
-import hudson.model.BuildListener;
+import com.google.common.base.Joiner;
+import hudson.model.TaskListener;
 
 import java.io.IOException;
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
+import java.nio.file.Files;
 import java.util.Collections;
-import java.util.Objects;
+import java.util.List;
+import java.util.Optional;
 
-class GoogleDriveManager {
+class GoogleDriveManager extends ManagerBase {
+    
+    GoogleDriveManager(final Drive driveService, final TaskListener listener) {
+        super(driveService, listener);
+    }
 
-    private static final int MB = 0x100000;
-
-    private static final String APPLICATION_NAME = "Jenkins drive uploader";
-
-    private static HttpTransport HTTP_TRANSPORT;
-
-    static {
-        try {
-            HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
-        } catch (Throwable t) {
-            t.printStackTrace();
+    void uploadFolder(java.io.File source, String destFolderName, String userMail) {
+        listener.getLogger().printf("userMail %s%n", userMail);
+        File destFolder = findDestFolderInDrive(destFolderName, userMail);
+        if (destFolder != null) {
+            uploadFile(source, destFolder);
         }
     }
 
-    private final Drive drive;
-
-    GoogleDriveManager(Credential credentials) {
-        drive = getDriveService(credentials);
-    }
-
-    private Drive getDriveService(Credential credential) {
-        return new Drive.Builder(
-                HTTP_TRANSPORT, new JacksonFactory(), credential)
-                .setApplicationName(APPLICATION_NAME)
-                .build();
-    }
-
-    void uploadFolder(String file, String remoteDir, BuildListener listener, String userMail) {
-        java.io.File tmpFile = new java.io.File(file);
-        listener.getLogger().println("userMail " + userMail);
-        File parent = controlParent(remoteDir, userMail);
-        if (parent != null) {
-            uploadFile(parent.getId(), tmpFile, listener);
-        }
-    }
-
-    private void uploadFile(String copyTo, final java.io.File downloaded, final BuildListener listener) {
+    @Override
+    protected Optional<File> findInFolderByQuery(final String query){
         try {
-            if (downloaded != null && downloaded.isDirectory()) {
-                File folder = new com.google.api.services.drive.model.File();
-                folder.setName(downloaded.getName());
-                if (!"-".equals(copyTo)) {
-                    folder.setParents(Collections.singletonList(copyTo));
+            String pageToken = null;
+            do {
+                FileList result = drive.files().list()
+                    .setQ(query)
+                    .setPageToken(pageToken)
+                    .execute();
+                for (File file : result.getFiles()) {
+                    listener.getLogger().printf("Found %s (%s)%n", file.getName(), file.getId());
+                    return Optional.of(file);
                 }
-                folder.setMimeType("application/vnd.google-apps.folder");
-                com.google.api.services.drive.model.File newFolder;
-                try {
-                    newFolder = drive.files().create(folder)
-                            .setFields("id")
-                            .execute();
-                    for (java.io.File file : Objects.requireNonNull(downloaded.listFiles())) {
-                        uploadFile( newFolder.getId(), file, listener);
-                    }
-                } catch (IOException e) {
-                    listener.getLogger().println(e.getMessage());
-                }
-            } else {
-                com.google.api.services.drive.model.File body1 = new com.google.api.services.drive.model.File();
-
-
-                if (downloaded != null) {
-                    listener.getLogger().println("File upload starting. " + downloaded.getPath());
-                    body1.setName(downloaded.getName());
-                    String type1 = java.nio.file.Files.probeContentType(downloaded.toPath());
-                    body1.setMimeType(type1);
-                    if (!copyTo.isEmpty() && !"-".equals(copyTo)) {
-                        body1.setParents(Collections.singletonList(copyTo));
-                    }
-                    FileContent mediaContent1 = new FileContent(type1, downloaded);
-                    Drive.Files.Create create = drive.files().create(body1, mediaContent1);
-                    MediaHttpUploader uploader = create.getMediaHttpUploader();
-                    uploader.setDirectUploadEnabled(false);
-                    uploader.setChunkSize(2 * MB);
-                    uploader.setProgressListener(new MediaHttpUploaderProgressListener() {
-                        @Override
-                        public void progressChanged(MediaHttpUploader uploader) throws IOException {
-                            switch (uploader.getUploadState()) {
-                                case MEDIA_IN_PROGRESS:
-                                    NumberFormat formatter = new DecimalFormat("#0.00");
-                                    String progress = formatter.format(uploader.getProgress() * 100);
-                                    listener.getLogger().println("Uploading in progress %" + progress);
-                                    break;
-                                case MEDIA_COMPLETE:
-                                    listener.getLogger().println("Uploading finish " + downloaded.getPath());
-                                    break;
-                            }
-                        }
-                    });
-                    create.execute();
-                }
-            }
+                pageToken = result.getNextPageToken();
+            } while (pageToken != null);
         } catch (IOException e) {
-            listener.getLogger().println(e.getMessage());
+            listener.error(e.getMessage());
         }
+        return Optional.empty();
     }
 
-    private File controlParent(String parentId, String userMail) {
+    @Override
+    protected File createNewFolder(File parentFolder, String name) {
+        return createNewFolder(Collections.singletonList(parentFolder.getName()),
+            Collections.singletonList(parentFolder.getId()), name);
+    }
 
+    @Override
+    protected DriveRequest<File> createUpdateFileRequest(final File existingFile, final File destFolder, final java.io.File source) throws IOException {
+        // Create new File content
+        String type = Files.probeContentType(source.toPath());
+        FileContent newContentInputStream = new FileContent(type, source);
+        File newContent = createNewFile(source.getName(), type);
+        // Update existing file with the new File content
+        return drive.files()
+            .update(existingFile.getId(), newContent, newContentInputStream)
+            .setAddParents(destFolder.getId());
+    }
+
+    @Override
+    protected DriveRequest<File> createNewFileRequest(final File destFolder, final java.io.File source) throws IOException {
+        // Create new File content
+        String type = Files.probeContentType(source.toPath());
+        FileContent newContentInputStream = new FileContent(type, source);
+        File newContent = createNewFile(destFolder, source.getName(), type);
+        // Create a new file with the new File content
+        return drive.files()
+            .create(newContent, newContentInputStream);
+    }
+    
+    private File createNewFile(File parentFolder, String name, String type) {
+        File file = createNewFile(name, type);
+        if (!parentFolder.getId().isEmpty() && !"-".equals(parentFolder.getId())) {
+            file.setParents(Collections.singletonList(parentFolder.getId()));
+        }
+        return file;
+    }
+
+    private File createNewFile(String name, String type) {
+        File file = new File();
+        file.setName(name);
+        file.setMimeType(type);
+        return file;
+    }
+
+    private File findDestFolderInDrive(String destFolderName, String userMail) {
+        String[] destinationFolders = destFolderName.split("/");
+        File destFolder = controlParent(destinationFolders[0], userMail);
+        // Find or create additional subdirs
+        for (int i = 1; i < destinationFolders.length && destFolder != null; i++) {
+            String subFolderName = destinationFolders[i];
+            File newParentFolder = destFolder;
+            destFolder = findFolderInFolder(newParentFolder, subFolderName)
+                .orElseGet(() -> createNewFolder(Collections.singletonList(newParentFolder.getName()), Collections.singletonList(newParentFolder.getId()),
+                    subFolderName));
+        }
+        return destFolder;
+    }
+    
+    private File controlParent(String destFolderName, String userMail) {
         String[] mails = userMail.split(";");
-
         try {
-            FileList list = drive.files().list().execute();
 
-            for (File file : list.getFiles()) {
-                if (parentId.equals(file.getName())) {
-                    return file;
-                }
+            Optional<File> destFolder = findDestFolderDrive(destFolderName);
+            if (destFolder.isPresent()){
+                return destFolder.get();
             }
-
-            File file = new File();
-            file.setName(parentId);
-            file.setMimeType("application/vnd.google-apps.folder");
-
-            File inserted = drive.files().create(file).execute();
-
+            File inserted = createNewFolder(Collections.singletonList("root"), Collections.emptyList(), destFolderName);
+            
             BatchRequest batch = drive.batch();
-
-            JsonBatchCallback<Permission> callBack = new JsonBatchCallback<Permission>() {
-                @Override
-                public void onSuccess(Permission permission, HttpHeaders httpHeaders) throws IOException {
-
-                }
-
-                @Override
-                public void onFailure(GoogleJsonError googleJsonError, HttpHeaders httpHeaders) throws IOException {
-
-                }
-            };
-
-            for(String mail : mails)
-            {
+            JsonBatchCallback<Permission> callBack = getPermissionJsonBatchCallback(destFolderName);
+            for (String mail : mails) {
                 Permission userPermission = new Permission()
-                        .setType("user")
-                        .setRole("writer")
-                        .setEmailAddress(mail);
+                    //                    .setValue(mail)
+                    .setType("user")
+                    .setRole("writer")
+                    .setEmailAddress(mail);
                 drive.permissions().create(inserted.getId(), userPermission)
-                        .setFields("id")
-                        .queue(batch,callBack);
+                    .setFields("id")
+                    .queue(batch, callBack);
             }
             batch.execute();
 
-
-
             return inserted;
-
         } catch (IOException e) {
-            e.printStackTrace();
+            listener.error("Error accessing Google Drive Folder " + destFolderName, e);
         }
-
         return null;
     }
+
+    private JsonBatchCallback<Permission> getPermissionJsonBatchCallback(final String destFolderName) {
+        return new JsonBatchCallback<Permission>() {
+                    @Override
+                    public void onSuccess(Permission permission, HttpHeaders httpHeaders) throws IOException {
+                        listener.getLogger().printf("Write permissions set to Folder %s for %s%n", destFolderName, permission.getEmailAddress());
+                    }
+    
+                    @Override
+                    public void onFailure(GoogleJsonError googleJsonError, HttpHeaders httpHeaders) throws IOException {
+                        listener.error("Error assigning permissions to Folder " + destFolderName + " : " + googleJsonError.getMessage());
+                    }
+                };
+    }
+
+    private Optional<File> findDestFolderDrive(final String destFolderName) {
+        listener.getLogger().printf("Searching for %s%n", destFolderName);
+        return findInFolderByQuery(String.format("mimeType='%s' and name='%s' and trashed=false",
+            GOOGLE_DRIVE_FOLDER_MIMETYPE, destFolderName));
+    }
+    
+    private  File createNewFolder(final List<String> parentNames, final List<String> parentIds, final String name){
+        // Need to create the folder...
+        File fileMetadata = new File();
+        fileMetadata.setName(name);
+        fileMetadata.setMimeType(GOOGLE_DRIVE_FOLDER_MIMETYPE);
+        fileMetadata.setParents(parentIds);
+        try {
+            File newFolder = drive.files().create(fileMetadata)
+                .setSupportsTeamDrives(true)
+                .setFields("id, name, parents")
+                .execute();
+            listener.getLogger().printf("Created new Folder %s (%s) in %s (%s)%n",
+                newFolder.getName(), newFolder.getId(), Joiner.on(",").join(parentNames),  Joiner.on(",").join(parentIds));
+            return newFolder;
+        } catch (IOException e) {
+            listener.error("Error creating folder in Shared Drive", e);
+        }
+        return null;
+    }
+
+    public void cleanup(final String type, final List<String> names) {
+        try {
+            String pageToken = null;
+            do {
+                FileList result = drive.files().list()
+                    .setPageToken(pageToken)
+                    .execute();
+                List<com.google.api.services.drive.model.File> files = result.getFiles();
+                for (com.google.api.services.drive.model.File file : files) {
+                    if (file.getMimeType().equals(type) && names.contains(file.getName()) ) {
+                        deleteFile(file);
+                    }
+                }
+                pageToken = result.getNextPageToken();
+            } while (pageToken != null);
+        } catch (IOException e) {
+            listener.error("Error cleaning up files", e);
+        }
+    }
+
+    private void deleteFile(final com.google.api.services.drive.model.File file) {
+        try {
+            listener.getLogger().printf("Deleting %s (%s)%n", file.getName(), file.getId());
+            drive.files().delete(file.getId()).execute();
+        } catch (IOException e) {
+            listener.error("Error deleting file", e);
+        }
+    }
+
 }

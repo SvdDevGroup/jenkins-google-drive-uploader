@@ -1,0 +1,2 @@
+This file is a second test resource for the Google Drive Uploader Jenkins plugin 
+it should get uploaded to a Google drive folder

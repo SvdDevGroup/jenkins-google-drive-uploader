@@ -15,6 +15,6 @@ public class DriveScopeRequirement extends GoogleOAuth2ScopeRequirement {
      */
     @Override
     public Collection<String> getScopes() {
-        return ImmutableList.of(DriveScopes.DRIVE_FILE);
+        return ImmutableList.of(DriveScopes.DRIVE_FILE, DriveScopes.DRIVE_READONLY);
     }
 }

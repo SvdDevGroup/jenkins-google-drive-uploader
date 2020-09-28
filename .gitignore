@@ -53,3 +53,6 @@ buildNumber.properties
 .settings/
 .project
 .classpath
+
+# Don't commit you personal itntegration test configuration
+src/test/resources/integration_test.properties
