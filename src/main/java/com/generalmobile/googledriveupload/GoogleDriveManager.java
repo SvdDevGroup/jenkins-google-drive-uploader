@@ -10,11 +10,10 @@ import com.google.api.client.googleapis.media.MediaHttpUploaderProgressListener;
 import com.google.api.client.http.FileContent;
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.client.http.HttpTransport;
-import com.google.api.client.json.jackson.JacksonFactory;
+import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
-import com.google.api.services.drive.model.ParentReference;
 import com.google.api.services.drive.model.Permission;
 import hudson.model.BuildListener;
 
@@ -66,14 +65,14 @@ class GoogleDriveManager {
         try {
             if (downloaded != null && downloaded.isDirectory()) {
                 File folder = new com.google.api.services.drive.model.File();
-                folder.setTitle(downloaded.getName());
+                folder.setName(downloaded.getName());
                 if (!"-".equals(copyTo)) {
-                    folder.setParents(Collections.singletonList(new ParentReference().setId(copyTo)));
+                    folder.setParents(Collections.singletonList(copyTo));
                 }
                 folder.setMimeType("application/vnd.google-apps.folder");
                 com.google.api.services.drive.model.File newFolder;
                 try {
-                    newFolder = drive.files().insert(folder)
+                    newFolder = drive.files().create(folder)
                             .setFields("id")
                             .execute();
                     for (java.io.File file : Objects.requireNonNull(downloaded.listFiles())) {
@@ -88,14 +87,14 @@ class GoogleDriveManager {
 
                 if (downloaded != null) {
                     listener.getLogger().println("File upload starting. " + downloaded.getPath());
-                    body1.setTitle(downloaded.getName());
+                    body1.setName(downloaded.getName());
                     String type1 = java.nio.file.Files.probeContentType(downloaded.toPath());
                     body1.setMimeType(type1);
                     if (!copyTo.isEmpty() && !"-".equals(copyTo)) {
-                        body1.setParents(Collections.singletonList(new ParentReference().setId(copyTo)));
+                        body1.setParents(Collections.singletonList(copyTo));
                     }
                     FileContent mediaContent1 = new FileContent(type1, downloaded);
-                    Drive.Files.Insert create = drive.files().insert(body1, mediaContent1);
+                    Drive.Files.Create create = drive.files().create(body1, mediaContent1);
                     MediaHttpUploader uploader = create.getMediaHttpUploader();
                     uploader.setDirectUploadEnabled(false);
                     uploader.setChunkSize(2 * MB);
@@ -129,17 +128,17 @@ class GoogleDriveManager {
         try {
             FileList list = drive.files().list().execute();
 
-            for (File file : list.getItems()) {
-                if (parentId.equals(file.getTitle())) {
+            for (File file : list.getFiles()) {
+                if (parentId.equals(file.getName())) {
                     return file;
                 }
             }
 
             File file = new File();
-            file.setTitle(parentId);
+            file.setName(parentId);
             file.setMimeType("application/vnd.google-apps.folder");
 
-            File inserted = drive.files().insert(file).execute();
+            File inserted = drive.files().create(file).execute();
 
             BatchRequest batch = drive.batch();
 
@@ -158,11 +157,10 @@ class GoogleDriveManager {
             for(String mail : mails)
             {
                 Permission userPermission = new Permission()
-                        .setValue(mail)
                         .setType("user")
                         .setRole("writer")
                         .setEmailAddress(mail);
-                drive.permissions().insert(inserted.getId(), userPermission)
+                drive.permissions().create(inserted.getId(), userPermission)
                         .setFields("id")
                         .queue(batch,callBack);
             }
