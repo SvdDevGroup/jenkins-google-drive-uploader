@@ -21,9 +21,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.UUID;
 import java.util.logging.LogManager;
+import java.util.regex.Pattern;
 
 import static com.generalmobile.googledriveupload.DriveMockHttpTransport.BatchCreateRequest;
 import static com.generalmobile.googledriveupload.DriveMockHttpTransport.FilesCreateRequest;
@@ -136,7 +141,7 @@ public class GoogleDriveManagerTest {
             "Searching for " + fileToUpload.getName() + " in " + FOLDER_NAME + " (" + FOLDER_ID + ")",
             "Creating new File " + fileToUpload.getName() + " in " + FOLDER_NAME + " (" + FOLDER_ID + ")",
             "Start uploading " + fileToUpload.getAbsolutePath());
-        mockBuildListenerHelper.assertErrors(fileToUpload.getAbsolutePath() + " (No such file or directory)");
+        mockBuildListenerHelper.assertErrors(GetFileNotFoundMessage(fileToUpload.getAbsolutePath()));
     }
 
     @Test
@@ -221,6 +226,15 @@ public class GoogleDriveManagerTest {
             "Start uploading " + file_2.getAbsolutePath(),
             "Finished uploading " + file_2.getAbsolutePath());
         mockBuildListenerHelper.assertNoErrors();
+    }
+    
+    private static String GetFileNotFoundMessage(String path) {
+        try {
+        	new FileInputStream(path).close();
+        	return "";
+	    } catch (IOException e) {
+	    	return e.getMessage();
+	    }
     }
 }
 

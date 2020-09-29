@@ -126,7 +126,6 @@ class GoogleDriveManager extends ManagerBase {
             JsonBatchCallback<Permission> callBack = getPermissionJsonBatchCallback(destFolderName);
             for (String mail : mails) {
                 Permission userPermission = new Permission()
-                    //                    .setValue(mail)
                     .setType("user")
                     .setRole("writer")
                     .setEmailAddress(mail);

@@ -7,9 +7,12 @@
 package com.generalmobile.googledriveupload;
 
 import hudson.EnvVars;
+import hudson.model.BuildListener;
+
 import org.junit.Before;
 import org.junit.Test;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Path;
@@ -27,11 +30,10 @@ public class GoogleDriveUploaderTest {
     public void setupLogger() throws IOException, URISyntaxException {
         workspace = Paths.get(this.getClass().getClassLoader().getResource("subdir").toURI()).getParent();
     }
-    
 
     @Test
     public void getUploadFiles_withFileName() throws IOException, InterruptedException {
-        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "subdir/test_file_1.txt", env);
+        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "subdir/test_file_1\\.txt", env);
         assertEquals(1, uploadFiles.size());
     }
 
@@ -43,19 +45,19 @@ public class GoogleDriveUploaderTest {
     
     @Test
     public void getUploadFiles_withDubbleStartPattern() throws IOException, InterruptedException {
-        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "**/*.txt", env);
+        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, ".*/[^/]*\\.txt", env);
         assertEquals(2, uploadFiles.size());
     }
 
     @Test
     public void getUploadFiles_withStarPattern() throws IOException, InterruptedException {
-        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "*/*1.txt", env);
+        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "[^/]*/[^/]*1.txt", env);
         assertEquals(1, uploadFiles.size());
     }
     
     @Test
     public void getUploadFiles_witMultiplePatterns() throws IOException, InterruptedException {
-        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "subdir,*/*1.txt,**/*.txt", env);
+        Set<Path> uploadFiles = GoogleDriveUploader.getUploadFiles(workspace, "subdir, [^/]*/[^/]*1\\.txt,.*/[^/]*\\.txt", env);
         assertEquals(3, uploadFiles.size());
     }
 }

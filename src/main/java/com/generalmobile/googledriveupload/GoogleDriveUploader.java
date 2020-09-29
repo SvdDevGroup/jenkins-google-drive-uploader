@@ -50,6 +50,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.regex.Pattern;
 import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -78,6 +79,7 @@ public final class GoogleDriveUploader extends Recorder implements SimpleBuildSt
         this.credentialsId = checkNotNull(credentialsId);
         this.driveFolderName = checkNotNull(driveFolderName);
         this.uploadFolder = checkNotNull(uploadFolder);
+        this.userMail = checkNotNull(userMail);
     }
 
     @DataBoundSetter
@@ -92,14 +94,6 @@ public final class GoogleDriveUploader extends Recorder implements SimpleBuildSt
 
     public FormValidation doCheckUserMail(@QueryParameter String value) {
         return FormValidation.error("Not a number");
-           /* int at =StringUtils.countOccurrencesOf(value,"@");
-            int semicolon =StringUtils.countOccurrencesOf(value,";");
-
-            if (at-1==semicolon)
-                return FormValidation.warning("Please check mail again. If you using multi mail please separate each mail with ;");
-            else
-                return FormValidation.ok();*/
-
     }
 
     public String getCredentialsId() {
@@ -133,15 +127,16 @@ public final class GoogleDriveUploader extends Recorder implements SimpleBuildSt
         try {
             listener.getLogger().println("Google Drive Uploading Plugin Started.");
             Set<Path> uploadPaths = getUploadFiles(Paths.get(workspace.toURI()) , uploadFolder, run.getEnvironment(listener));
-            listener.getLogger().println("Uploading folder: " + workspace);
             if ( sharedDriveName.isEmpty()) {
                 GoogleDriveManager driveManager = new GoogleDriveManager(getDriveService(), listener);
                 for (Path uploadFilePath: uploadPaths) {
+    	            listener.getLogger().println("Uploading folder '" + uploadFilePath.toString() + "' to user's drive");
                     driveManager.uploadFolder(uploadFilePath.toFile(), getDriveFolderName(), userMail);
                 }
             } else {
                 SharedDriveManager driveManager = new SharedDriveManager(getDriveService(), sharedDriveName, listener);
                 for (Path uploadFilePath: uploadPaths) {
+		            listener.getLogger().println("Uploading folder '" + uploadFilePath.toString() + "' to shared drive " + sharedDriveName);
                     driveManager.uploadFolderToSharedDrive(uploadFilePath.toFile(), getDriveFolderName());
                 }
             }
@@ -155,17 +150,21 @@ public final class GoogleDriveUploader extends Recorder implements SimpleBuildSt
         if (!uploadFolderPatterns.isEmpty()){
             String[] uploadFilePatterns = env.expand(uploadFolderPatterns).split("\\s*,\\s*");
             for (String uploadFilePattern: uploadFilePatterns){
-                PathMatcher pathMatcher = FileSystems.getDefault().getPathMatcher("glob:" + rootPath.toString() + File.separator + uploadFilePattern);
+                Pattern pathMatcher = Pattern.compile(PreparePathPattern(uploadFilePattern));
                 Files.walkFileTree(rootPath, new SimpleFileVisitor<Path>() {
                     public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                        if (pathMatcher.matches(dir)) {
+                        if (dir == rootPath)
+                            return FileVisitResult.CONTINUE;
+                        Path relative = rootPath.relativize(dir);
+                        if (pathMatcher.matcher(relative.toString()).matches()) {
                             uploadFilePaths.add(dir);
                         }
                         return FileVisitResult.CONTINUE;
                     }
                     @Override
                     public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)  {
-                        if (pathMatcher.matches(path)) {
+                        Path relative = rootPath.relativize(path);
+                        if (pathMatcher.matcher(relative.toString()).matches()) {
                             uploadFilePaths.add(path);
                         }
                         return FileVisitResult.CONTINUE;
@@ -176,6 +175,12 @@ public final class GoogleDriveUploader extends Recorder implements SimpleBuildSt
             uploadFilePaths.add(rootPath);
         }
         return uploadFilePaths;
+    }
+    
+    private static String PreparePathPattern(String pathPattern) {
+        if (File.separatorChar == '\\')
+            return pathPattern.replace("/", "\\\\");
+        return pathPattern;
     }
 
     private Drive getDriveService() throws GeneralSecurityException {
